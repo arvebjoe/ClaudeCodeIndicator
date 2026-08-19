@@ -13,4 +13,11 @@
     <ApplicationIcon></ApplicationIcon>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- Sound effects (.sounds\pop.mp3) ship next to the exe; Remove-then-Include
+         avoids duplicating the SDK's default None glob. -->
+    <None Remove=".sounds\**" />
+    <None Include=".sounds\**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

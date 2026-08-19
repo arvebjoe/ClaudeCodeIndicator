@@ -62,6 +62,14 @@ Claude Code hooks  --HTTP POST-->  tray app (HttpListener on :8787)  --optional 
   An absent/offline ESP is silently ignored. The ESP is entirely optional. Firmware lives in
   `firmware/` — `ClaudeCodeIndicatorMatrix/` (ESP32-S3-Matrix 8x8, renders the Claude mascot)
   and `ClaudeCodeIndicator/` (single-LED variant).
+- **Waiting chime.** Entering the Waiting (red) state plays `.sounds\pop.mp3` from next to the
+  exe via `winmm`'s `mciSendString` — `SoundPlayer` is WAV-only and WPF's `MediaPlayer` is too
+  heavy a dependency for one clip. The MCI device is opened once, replayed with `play … from 0`,
+  and closed in `Dispose`. It fires only on the *transition* into Waiting, so a repeated
+  `Notification` hook doesn't double-pop. A missing file or an MCI failure sets
+  `_soundUnavailable` and is silent forever after. Toggle via the tray menu
+  ("Play sound when waiting", persisted as `SoundMuted`). The csproj copies `.sounds\**` to
+  the output directory.
 
 ## Key implementation constraints
 

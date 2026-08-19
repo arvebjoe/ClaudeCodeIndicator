@@ -7,6 +7,7 @@ using System.Net;
 using System.Net.Http;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading;
@@ -23,6 +24,8 @@ internal sealed class AppSettings
 {
     public string? EspAddress { get; set; }
     public bool FirstRunDone { get; set; }
+    /// <summary>Silences the Waiting chime. Muted-not-Enabled so the default (false) plays sound.</summary>
+    public bool SoundMuted { get; set; }
 }
 
 internal static class Program
@@ -72,6 +75,7 @@ internal sealed class TrayContext : ApplicationContext
     private readonly ToolStripMenuItem _espItem;
     private readonly ToolStripMenuItem _startupItem;
     private readonly ToolStripMenuItem _hooksItem;
+    private readonly ToolStripMenuItem _soundItem;
     private readonly string _settingsPath;
     private readonly Icon[] _icons = new Icon[3];
     private readonly IntPtr[] _ownedHandles;           // generated-icon handles to free on exit
@@ -80,6 +84,16 @@ internal sealed class TrayContext : ApplicationContext
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool DestroyIcon(IntPtr handle);
+
+    // MCI plays MP3 with no extra dependencies (System.Media.SoundPlayer is WAV-only,
+    // and pulling in WPF's MediaPlayer just for a chime isn't worth it).
+    [DllImport("winmm.dll", CharSet = CharSet.Unicode)]
+    private static extern int mciSendString(string command, StringBuilder? returnValue,
+                                            int returnLength, IntPtr callback);
+
+    private const string SoundAlias = "ccIndicatorWaiting";
+    private bool _soundOpened;      // MCI device opened once, then replayed with "play from 0"
+    private bool _soundUnavailable; // file missing or MCI refused it — stop retrying
 
     public TrayContext()
     {
@@ -111,6 +125,10 @@ internal sealed class TrayContext : ApplicationContext
         {
             Checked = ClaudeHooksInstalled()
         };
+        _soundItem = new ToolStripMenuItem("Play sound when waiting", null, (_, _) => ToggleSound())
+        {
+            Checked = !_settings.SoundMuted
+        };
         _startupItem = new ToolStripMenuItem("Start with Windows", null, (_, _) => ToggleStartup())
         {
             Checked = IsStartupEnabled()
@@ -122,6 +140,7 @@ internal sealed class TrayContext : ApplicationContext
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(setEspItem);
         menu.Items.Add(_hooksItem);
+        menu.Items.Add(_soundItem);
         menu.Items.Add(_startupItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(exitItem);
@@ -225,12 +244,16 @@ internal sealed class TrayContext : ApplicationContext
 
     private void ApplyState(IndicatorState s)
     {
+        // Chime only on the transition *into* Waiting, so a repeated Notification
+        // hook for the same prompt doesn't pop twice.
+        bool entersWaiting = s == IndicatorState.Waiting && _state != IndicatorState.Waiting;
         _state = s;
         _tray.Icon = _icons[(int)s];
         (string label, _) = Describe(s);
         _tray.Text = $"Claude Code — {label}";
         _statusItem.Text = $"Status: {label}";
         _ = PushToEspAsync(s);
+        if (entersWaiting) PlayWaitingSound();
     }
 
     private static (string label, string hex) Describe(IndicatorState s) => s switch
@@ -239,6 +262,45 @@ internal sealed class TrayContext : ApplicationContext
         IndicatorState.Waiting => ("Waiting", "E53935"),
         _                      => ("Done",    "43A047"),
     };
+
+    // ------------------------------------------------------------------- sound
+
+    /// <summary>
+    /// Pops <c>.sounds\pop.mp3</c> (next to the exe) when a prompt needs attention.
+    /// Always called on the UI thread — MCI wants a message pump.
+    /// </summary>
+    private void PlayWaitingSound()
+    {
+        if (_settings.SoundMuted || _soundUnavailable) return;
+
+        if (!_soundOpened)
+        {
+            string path = Path.Combine(AppContext.BaseDirectory, ".sounds", "pop.mp3");
+            if (!File.Exists(path)) { _soundUnavailable = true; return; }
+
+            // "type mpegvideo" is the MCI driver that handles MP3; a couple of Windows
+            // installs prefer letting MCI pick by extension, so fall back to that.
+            if (mciSendString($"open \"{path}\" type mpegvideo alias {SoundAlias}", null, 0, IntPtr.Zero) != 0 &&
+                mciSendString($"open \"{path}\" alias {SoundAlias}", null, 0, IntPtr.Zero) != 0)
+            {
+                _soundUnavailable = true;
+                return;
+            }
+            _soundOpened = true;
+        }
+
+        // "from 0" rewinds, so a second prompt re-triggers the clip instead of no-oping
+        // at the end of the previous playback.
+        mciSendString($"play {SoundAlias} from 0", null, 0, IntPtr.Zero);
+    }
+
+    private void ToggleSound()
+    {
+        _settings.SoundMuted = !_settings.SoundMuted;
+        _soundItem.Checked = !_settings.SoundMuted;
+        SaveSettings();
+        if (!_settings.SoundMuted) PlayWaitingSound(); // preview so the toggle is audible
+    }
 
     // --------------------------------------------------------------------- ESP
 
@@ -508,6 +570,10 @@ internal sealed class TrayContext : ApplicationContext
         if (disposing)
         {
             try { if (_listener.IsListening) _listener.Stop(); _listener.Close(); } catch { }
+            if (_soundOpened)
+            {
+                try { mciSendString($"close {SoundAlias}", null, 0, IntPtr.Zero); } catch { }
+            }
             _http.Dispose();
             _tray.Visible = false;
             _tray.Dispose();
