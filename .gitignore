@@ -1,0 +1,17 @@
+# .NET build output
+bin/
+obj/
+*.user
+
+# Claude Code local settings (machine-specific permissions)
+.claude/settings.local.json
+
+# IDE
+.idea/
+
+# OS cruft
+Thumbs.db
+Desktop.ini
+
+# Firmware WiFi credentials (copy secrets.example.h -> secrets.h)
+firmware/**/secrets.h

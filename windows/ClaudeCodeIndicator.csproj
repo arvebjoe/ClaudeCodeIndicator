@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>ClaudeCodeIndicator</AssemblyName>
+    <RootNamespace>ClaudeCodeIndicator</RootNamespace>
+    <Version>1.0.0</Version>
+    <!-- Keeps the colored .ico files next to the exe if you add them -->
+    <ApplicationIcon></ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Sound effects (.sounds\*.mp3) ship next to the exe; Remove-then-Include
+         avoids duplicating the SDK's default None glob. -->
+    <None Remove=".sounds\**" />
+    <None Include=".sounds\**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>
