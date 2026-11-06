@@ -56,6 +56,23 @@ internal sealed record CodexUsageReading(
         }
     }
 
+    /// <summary>
+    /// One "percent used" number for the ESP's Codex gauge: the workspace credit limit
+    /// when there is one, else the tighter of the 5h/weekly windows. Null = nothing to show.
+    /// </summary>
+    public double? GaugeUsedPercent
+    {
+        get
+        {
+            if (CreditsUsed is { } u && CreditsLimit is { } l && l > 0)
+                return Math.Clamp((double)(u / l) * 100, 0, 100);
+            int? worst = null;
+            foreach (var w in new[] { Primary, Secondary })
+                if (w is not null && (worst is null || w.UsedPercent > worst)) worst = w.UsedPercent;
+            return worst is { } p ? Math.Clamp(p, 0, 100) : null;
+        }
+    }
+
     /// <summary>When the monthly credit limit resets, for the menu row.</summary>
     public string? ResetsText => CreditsResetAt?.ToLocalTime().ToString("MMM d", Inv);
 }
