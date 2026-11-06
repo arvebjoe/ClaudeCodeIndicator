@@ -27,6 +27,8 @@ edit `render.h`.
 
 ## Flashing
 
+Step-by-step guide with troubleshooting: [UPLOAD.md](UPLOAD.md). Short version:
+
 1. Boards Manager: install **esp32** by Espressif.
 2. Library Manager: install **GFX Library for Arduino** (Arduino_GFX, by moononournation).
 3. Set Board to **ESP32C3 Dev Module**, USB CDC On Boot to **Enabled**, and Flash Size to
