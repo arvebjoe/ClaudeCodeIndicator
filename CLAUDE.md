@@ -83,6 +83,18 @@ Claude Code hooks  --HTTP POST-->  tray app (HttpListener on :8787)  --optional 
   marked "(stale)". Toggle: "Read usage every 10 min" (`UsageTrackingOff`). Fragile by
   nature: a change to the `/usage` layout in a Claude Code update can break the regex.
 
+- **Codex usage (`windows/CodexUsageProbe.cs`).** Structured, no scraping: every 10 min
+  (first read 15 s after start, and on "Refresh usage now") it spawns `codex app-server`
+  (newline-delimited JSON-RPC over stdio) in `%APPDATA%\ClaudeCodeIndicator\codex-probe`,
+  does `initialize` → `initialized`, calls `account/rateLimits/read`, then kills the process
+  tree. It reads the `codex` bucket (or legacy `rateLimits`): `individualLimit`
+  (workspace monthly credit limit, `used`/`limit` as strings), `credits.balance`, and the
+  `primary`/`secondary` windows (`usedPercent`, 300 min = 5h, 10080 = weekly). Needs a
+  ChatGPT sign-in in Codex (`~/.codex/auth.json`). Finds `codex.exe` on PATH, else the npm
+  shim `codex.cmd` via `cmd.exe`. Shown in the "Codex:" menu row and tooltip; not sent to
+  the ESP. Toggle: "Read Codex usage every 10 min" (`CodexUsageOff`). The app-server
+  protocol is marked unstable upstream, so every field is treated as optional.
+
 ## Key implementation constraints
 
 These are easy to break and intentional:

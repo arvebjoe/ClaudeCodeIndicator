@@ -28,6 +28,8 @@ internal sealed class AppSettings
     public bool SoundMuted { get; set; }
     /// <summary>Turns off the periodic /usage reading (and the hidden claude session it keeps).</summary>
     public bool UsageTrackingOff { get; set; }
+    /// <summary>Turns off the periodic Codex usage reading (codex app-server).</summary>
+    public bool CodexUsageOff { get; set; }
 }
 
 internal static class Program
@@ -96,6 +98,14 @@ internal sealed class TrayContext : ApplicationContext
     private readonly ToolStripMenuItem _usageTrackItem;
     private UsageReading? _usage;
 
+    // Codex usage, read via `codex app-server` → account/rateLimits/read every 10 minutes.
+    private readonly CodexUsageProbe _codexProbe;
+    private readonly System.Windows.Forms.Timer _codexTimer = new();
+    private readonly ToolStripMenuItem _codexItem;
+    private readonly ToolStripMenuItem _codexTrackItem;
+    private CodexUsageReading? _codexUsage;
+    private bool _codexReading;
+
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool DestroyIcon(IntPtr handle);
 
@@ -149,18 +159,29 @@ internal sealed class TrayContext : ApplicationContext
         };
         var exitItem = new ToolStripMenuItem("Exit", null, (_, _) => ExitApp());
         _usageItem = new ToolStripMenuItem("Usage: not read yet") { Enabled = false };
-        _usageRefreshItem = new ToolStripMenuItem("Refresh usage now", null, (_, _) => _ = RefreshUsageAsync());
+        _usageRefreshItem = new ToolStripMenuItem("Refresh usage now", null, (_, _) =>
+        {
+            _ = RefreshUsageAsync();
+            if (!_settings.CodexUsageOff) _ = RefreshCodexUsageAsync();
+        });
         _usageTrackItem = new ToolStripMenuItem("Read usage every 10 min", null, (_, _) => ToggleUsageTracking())
         {
             Checked = !_settings.UsageTrackingOff
         };
+        _codexItem = new ToolStripMenuItem("Codex: not read yet") { Enabled = false };
+        _codexTrackItem = new ToolStripMenuItem("Read Codex usage every 10 min", null, (_, _) => ToggleCodexTracking())
+        {
+            Checked = !_settings.CodexUsageOff
+        };
 
         menu.Items.Add(_statusItem);
         menu.Items.Add(_usageItem);
+        menu.Items.Add(_codexItem);
         menu.Items.Add(_espItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(_usageRefreshItem);
         menu.Items.Add(_usageTrackItem);
+        menu.Items.Add(_codexTrackItem);
         menu.Items.Add(setEspItem);
         menu.Items.Add(_hooksItem);
         menu.Items.Add(_soundItem);
@@ -199,6 +220,68 @@ internal sealed class TrayContext : ApplicationContext
         };
         _usageTimer.Interval = 10_000;
         _usageTimer.Enabled = !_settings.UsageTrackingOff;
+
+        // --- Codex usage: same cadence, staggered so the two reads don't overlap ---
+        _codexProbe = new CodexUsageProbe(Path.Combine(dir, "codex-probe"));
+        _codexTimer.Tick += (_, _) =>
+        {
+            _codexTimer.Interval = (int)UsageInterval.TotalMilliseconds;
+            _ = RefreshCodexUsageAsync();
+        };
+        _codexTimer.Interval = 15_000;
+        if (_settings.CodexUsageOff) _codexItem.Text = "Codex: off";
+        _codexTimer.Enabled = !_settings.CodexUsageOff;
+    }
+
+    /// <summary>Runs on the UI thread. Spawns codex app-server, asks once, kills it.</summary>
+    private async Task RefreshCodexUsageAsync()
+    {
+        if (_codexReading) return;
+        _codexReading = true;
+        if (_codexUsage is null) _codexItem.Text = "Codex: reading…";
+        try
+        {
+            if (!CodexUsageProbe.IsInstalled)
+            {
+                _codexItem.Text = "Codex: not installed";
+                return;
+            }
+            _codexUsage = await _codexProbe.ReadAsync();
+            _codexItem.Text = $"Codex: {_codexUsage.Short}" +
+                (_codexUsage.ResetsText is { } r ? $" · resets {r}" : "");
+        }
+        catch (Exception ex)
+        {
+            // Not signed in, older codex without the method, timeout, ... — keep the last value.
+            _codexItem.Text = _codexUsage is null
+                ? $"Codex: unavailable ({ex.Message})"
+                : $"Codex: {_codexUsage.Short} (stale)";
+        }
+        finally
+        {
+            _codexReading = false;
+            UpdateTooltip();
+        }
+    }
+
+    private void ToggleCodexTracking()
+    {
+        _settings.CodexUsageOff = !_settings.CodexUsageOff;
+        _codexTrackItem.Checked = !_settings.CodexUsageOff;
+        SaveSettings();
+        if (_settings.CodexUsageOff)
+        {
+            _codexTimer.Stop();
+            _codexUsage = null;
+            _codexItem.Text = "Codex: off";
+            UpdateTooltip();
+        }
+        else
+        {
+            _codexTimer.Interval = (int)UsageInterval.TotalMilliseconds;
+            _codexTimer.Start();
+            _ = RefreshCodexUsageAsync();
+        }
     }
 
     // ------------------------------------------------------------------- usage
@@ -259,6 +342,7 @@ internal sealed class TrayContext : ApplicationContext
         (string label, _) = Describe(_state);
         string text = $"Claude Code — {label}";
         if (_usage is not null) text += $"\n{_usage.Short}";
+        if (_codexUsage is not null) text += $"\nCodex {_codexUsage.Short}";
         _tray.Text = text.Length > 127 ? text[..127] : text; // NotifyIcon.Text limit
     }
 
@@ -697,6 +781,7 @@ internal sealed class TrayContext : ApplicationContext
             CloseSound(_waitingSound);
             CloseSound(_doneSound);
             _usageTimer.Dispose();
+            _codexTimer.Dispose();
             _usageProbe.Dispose(); // closes the hidden claude session
             _http.Dispose();
             _tray.Visible = false;
