@@ -60,8 +60,11 @@ Claude Code hooks  --HTTP POST-->  tray app (HttpListener on :8787)  --optional 
   is written before every change. If the file is JSONC/invalid, the app warns and changes nothing.
 - **ESP32 push is fire-and-forget**, 2 s timeout: `GET http://<esp>/state?value=<state>&rgb=<hex>`.
   An absent/offline ESP is silently ignored. The ESP is entirely optional. Firmware lives in
-  `firmware/` — `ClaudeCodeIndicatorMatrix/` (ESP32-S3-Matrix 8x8, renders the Claude mascot)
-  and `ClaudeCodeIndicator/` (single-LED variant).
+  `firmware/` — `ClaudeCodeIndicatorMatrix/` (ESP32-S3-Matrix 8x8, renders the Claude mascot),
+  `ClaudeCodeIndicator/` (single-LED variant) and `ClaudeCodeIndicatorRound/` (ESP32-2424S012,
+  ESP32-C3 + 1.28" round GC9A01 via Arduino_GFX: Claude/Codex usage half rings and animated
+  Clawd + Codex avatars). The round firmware's drawing lives in `render.h`, which is pure C++
+  so `tools/preview.cpp` can render frames on a PC; see its README.
 - **Waiting chime.** Entering the Waiting (red) state plays `.sounds\pop.mp3` from next to the
   exe via `winmm`'s `mciSendString` — `SoundPlayer` is WAV-only and WPF's `MediaPlayer` is too
   heavy a dependency for one clip. The MCI device is opened once, replayed with `play … from 0`,
@@ -91,8 +94,13 @@ Claude Code hooks  --HTTP POST-->  tray app (HttpListener on :8787)  --optional 
   (workspace monthly credit limit, `used`/`limit` as strings), `credits.balance`, and the
   `primary`/`secondary` windows (`usedPercent`, 300 min = 5h, 10080 = weekly). Needs a
   ChatGPT sign-in in Codex (`~/.codex/auth.json`). Finds `codex.exe` on PATH, else the npm
-  shim `codex.cmd` via `cmd.exe`. Shown in the "Codex:" menu row and tooltip; not sent to
-  the ESP. Toggle: "Read Codex usage every 10 min" (`CodexUsageOff`). The app-server
+  shim `codex.cmd` via `cmd.exe`. Shown in the "Codex:" menu row and tooltip, and sent to
+  the ESP as `&cused=<percent used>` (`GaugeUsedPercent`: credit limit if any, else the
+  fuller of the 5h/weekly windows).
+- **Codex state.** `/codex/working|waiting|done` on the same listener set `_codexState`,
+  which is only forwarded to the ESP (`&codex=<state>`); the tray icon stays Claude-only.
+  The app does not install Codex hooks — they're set up by hand (see
+  `firmware/ClaudeCodeIndicatorRound/README.md`). Toggle: "Read Codex usage every 10 min" (`CodexUsageOff`). The app-server
   protocol is marked unstable upstream, so every field is treated as optional.
 
 ## Key implementation constraints

@@ -106,6 +106,10 @@ internal sealed class TrayContext : ApplicationContext
     private CodexUsageReading? _codexUsage;
     private bool _codexReading;
 
+    // Codex's own state, from optional Codex hooks POSTing /codex/<state> (see
+    // firmware/ClaudeCodeIndicatorRound/README.md). Only forwarded to the ESP.
+    private IndicatorState _codexState = IndicatorState.Done;
+
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool DestroyIcon(IntPtr handle);
 
@@ -261,6 +265,7 @@ internal sealed class TrayContext : ApplicationContext
         {
             _codexReading = false;
             UpdateTooltip();
+            _ = PushToEspAsync(_state); // refresh the round display's Codex ring
         }
     }
 
@@ -274,6 +279,7 @@ internal sealed class TrayContext : ApplicationContext
             _codexTimer.Stop();
             _codexUsage = null;
             _codexItem.Text = "Codex: off";
+            _ = PushToEspAsync(_state); // Codex ring goes dim (unknown)
             UpdateTooltip();
         }
         else
@@ -403,6 +409,16 @@ internal sealed class TrayContext : ApplicationContext
                 _ => null
             };
             if (next is { } s) RequestState(s);
+
+            // Codex hooks: /codex/working | /codex/waiting | /codex/done.
+            IndicatorState? codex = path switch
+            {
+                "codex/working" => IndicatorState.Working,
+                "codex/waiting" => IndicatorState.Waiting,
+                "codex/done"    => IndicatorState.Done,
+                _ => null
+            };
+            if (codex is { } c) RequestCodexState(c);
         }
         catch
         {
@@ -418,6 +434,20 @@ internal sealed class TrayContext : ApplicationContext
             _marshal.BeginInvoke((MethodInvoker)(() => ApplyState(s)));
         else
             ApplyState(s);
+    }
+
+    private void RequestCodexState(IndicatorState s)
+    {
+        void Apply()
+        {
+            if (_codexState == s) return;
+            _codexState = s;
+            _ = PushToEspAsync(_state);
+        }
+        if (_marshal.IsHandleCreated && _marshal.InvokeRequired)
+            _marshal.BeginInvoke((MethodInvoker)Apply);
+        else
+            Apply();
     }
 
     private void ApplyState(IndicatorState s)
@@ -519,6 +549,10 @@ internal sealed class TrayContext : ApplicationContext
         if (_usage is { Limit: > 0 } u)
             url += string.Format(System.Globalization.CultureInfo.InvariantCulture,
                 "&spent={0:0.00}&limit={1:0.00}", u.Spent, u.Limit);
+        // Codex state and usage for the round display (the matrix ignores them).
+        url += $"&codex={Describe(_codexState).label.ToLowerInvariant()}";
+        if (_codexUsage?.GaugeUsedPercent is { } cused)
+            url += string.Format(System.Globalization.CultureInfo.InvariantCulture, "&cused={0:0.0}", cused);
         try { using var resp = await _http.GetAsync(url); }
         catch { /* ESP offline or not present — ignore */ }
     }
