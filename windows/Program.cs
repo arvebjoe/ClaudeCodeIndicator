@@ -548,7 +548,8 @@ internal sealed class TrayContext : ApplicationContext
         // state). Left out when unknown, which tells the ESP to show the mascot.
         if (_usage is { Limit: > 0 } u)
             url += string.Format(System.Globalization.CultureInfo.InvariantCulture,
-                "&spent={0:0.00}&limit={1:0.00}", u.Spent, u.Limit);
+                "&spent={0:0.00}&limit={1:0.00}&allowed={2:0.00}",
+                u.Spent, u.Limit, WorkDays.AllowanceToDate(u.Limit, DateOnly.FromDateTime(DateTime.Now)));
         // Codex state and usage for the round display (the matrix ignores them).
         url += $"&codex={Describe(_codexState).label.ToLowerInvariant()}";
         if (_codexUsage?.GaugeUsedPercent is { } cused)

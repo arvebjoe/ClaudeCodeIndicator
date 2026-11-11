@@ -129,9 +129,15 @@ These are easy to break and intentional:
 | `Stop` | `/done` | Done | `#43A047` green | quota gauge (solid mascot if no quota known) |
 
 **Quota gauge.** While the tray app has a usage reading, every ESP push appends
-`&spent=<usd>&limit=<usd>` (invariant format), and it re-pushes after each read, so going idle sends the last known budget at once and the fresh one a few seconds later. In the
-done state the matrix lights one green LED per `limit/64` of remaining budget. Spent LEDs go
+`&spent=<usd>&limit=<usd>&allowed=<usd>` (invariant format), and it re-pushes after each read, so going idle sends the last known budget at once and the fresh one a few seconds later. In the
+done state the matrix lights one LED per `limit/64` of remaining budget. Spent LEDs go
 dark in reading order (top-left → right, then down), and the current one fades linearly. A push
 without `spent`/`limit` (tracking off, or no reading yet) shows the mascot again.
+
+**Daily pace.** `allowed` = `limit × work days so far (including today) / work days in the month`
+(`windows/WorkDays.cs`: Mon–Fri minus Norwegian public holidays, Easter included, plus Dec 24
+and Dec 31; the budget resets on the 1st). LEDs that cover `allowed` are green and the rest
+are Claude orange. Leftover green carries over to the next day. When spending passes the pace,
+the fading LED is orange and it pulses. If `allowed` is missing, every LED is green.
 
 Initial state is Done/green. `PreToolUse` re-arms red after a permission prompt (yellow) is approved.

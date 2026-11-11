@@ -20,13 +20,19 @@
 //
 // Quota: when the tray app knows the monthly usage credits it appends
 //
-//     &spent=<usd>&limit=<usd>          e.g. &spent=20.44&limit=800
+//     &spent=<usd>&limit=<usd>&allowed=<usd>
+//     e.g. &spent=20.44&limit=800&allowed=76.19
 //
 // In the done state the 64 LEDs then act as a fuel gauge: each LED is worth
-// limit/64 (800/64 = $12.50). Nothing spent = all green. As credit is spent
-// the LEDs go dark one at a time in reading order — top-left first, left to
-// right, top to bottom — with the current LED fading out proportionally.
-// All dark = the whole budget is used. Without spent/limit the mascot shows.
+// limit/64 (800/64 = $12.50). As credit is spent the LEDs go dark one at a
+// time in reading order — top-left first, left to right, top to bottom — with
+// the current LED fading out proportionally. All dark = the whole budget is used.
+//
+// `allowed` is the budget spread evenly over the month's work days, counted
+// through today. The LEDs that cover it are green and the rest are orange.
+// Within pace, the green ones fade first. Past it, an orange LED is fading and
+// it pulses. Leftover green carries over to the next day. Without `allowed`
+// all LEDs are green. Without spent/limit the mascot shows.
 //
 // Board: ESP32-S3-Matrix (Waveshare / SpotPear, ESP32-S3FH4R2) with an
 // onboard 8x8 WS2812 RGB matrix on GPIO14.
@@ -92,6 +98,12 @@ volatile uint8_t g_r = 0, g_g = 160, g_b = 0;  // boot color = green (done/idle)
 // Monthly usage credits from the tray app (USD). g_limit <= 0 = unknown, in
 // which case the done state shows the mascot instead of the quota gauge.
 volatile float g_spent = 0, g_limit = 0;
+// Budget allowed through today (USD); < 0 = not sent, whole gauge green.
+volatile float g_allowed = -1;
+
+// Gauge color for budget beyond today's pace (Claude orange, as the tray's
+// working color).
+const uint8_t OVER_R = 0xD3, OVER_G = 0x73, OVER_B = 0x55;
 
 // Per-pixel sprite mask 0–255, precomputed in setup(). 255 = mascot body
 // (lit in the state color), 0 = background and eyes (off/black).
@@ -166,40 +178,65 @@ void showSprite(uint8_t r, uint8_t g, uint8_t b, uint8_t level, bool eyesClosed)
   pixels.show();
 }
 
-// Quota gauge in `r,g,b`: one LED per limit/64 of budget. LEDs in reading
-// order (top-left → right, then down) are dark for credit already spent; the
-// LED currently being "used up" is dimmed by the fraction of it that's left.
-void showQuota(uint8_t r, uint8_t g, uint8_t b, float spent, float limit) {
+// At low BRIGHTNESS only a handful of PWM steps exist, so a dim level can
+// round to black. Returns the smallest fade level (0–255) whose brightest
+// channel still survives the library's brightness scaling (~256/(BRIGHTNESS+1)).
+uint16_t minVisibleLevel(uint8_t r, uint8_t g, uint8_t b) {
+  uint8_t maxc = r > g ? r : g;
+  if (b > maxc) maxc = b;
+  uint16_t need = (256 + BRIGHTNESS) / (BRIGHTNESS + 1);
+  uint16_t kMin = maxc ? (need * 255 + maxc - 1) / maxc : 255;
+  return kMin > 255 ? 255 : kMin;
+}
+
+// Quota gauge: one LED per limit/64 of budget. LEDs in reading order
+// (top-left → right, then down) are dark for credit already spent; the LED
+// currently being "used up" is dimmed by the fraction of it that's left.
+// LEDs covering `allowed` (budget through today) are green (`r,g,b`), the
+// rest orange. A fading orange LED means you're past today's pace, so it pulses.
+void showQuota(uint8_t r, uint8_t g, uint8_t b, float spent, float limit, float allowed) {
   r = Adafruit_NeoPixel::gamma8(r);
   g = Adafruit_NeoPixel::gamma8(g);
   b = Adafruit_NeoPixel::gamma8(b);
+  uint8_t orR = Adafruit_NeoPixel::gamma8(OVER_R);
+  uint8_t orG = Adafruit_NeoPixel::gamma8(OVER_G);
+  uint8_t orB = Adafruit_NeoPixel::gamma8(OVER_B);
 
   // Spent expressed in LEDs, 0..64 (e.g. $20.44 of $800 → 1.635 LEDs gone).
   float used = spent / limit * NUM_PIXELS;
   if (used < 0) used = 0;
   if (used > NUM_PIXELS) used = NUM_PIXELS;
 
-  // At low BRIGHTNESS only a handful of PWM steps exist, so a dim level can
-  // round to black. kMin is the smallest fade level whose brightest channel
-  // still survives the library's brightness scaling (~256/(BRIGHTNESS+1)).
-  uint8_t maxc = r > g ? r : g;
-  if (b > maxc) maxc = b;
-  uint16_t need = (256 + BRIGHTNESS) / (BRIGHTNESS + 1);
-  uint16_t kMin = maxc ? (need * 255 + maxc - 1) / maxc : 255;
-  if (kMin > 255) kMin = 255;
+  // Number of green LEDs. A partly covered LED counts as orange, so day 1 of
+  // a 21-day month (3.05 LEDs) shows 3 green.
+  int green = NUM_PIXELS;
+  if (allowed >= 0) green = (int)(allowed / limit * NUM_PIXELS + 0.001f);
+  if (green > NUM_PIXELS) green = NUM_PIXELS;
+
+  uint16_t kMinGreen = minVisibleLevel(r, g, b);
+  uint16_t kMinOrange = minVisibleLevel(orR, orG, orB);
+
+  // Pulse for the current orange LED: 35%–100% of its level on a 1.2 s sine.
+  float phase = (millis() % 1200) / 1200.0f * 2 * PI;
+  float pulse = 0.675f + 0.325f * sinf(phase);
+  int current = (int)used;                   // LED being used up right now
 
   for (int n = 0; n < NUM_PIXELS; n++) {
     float left = 1.0f - (used - n);          // remaining share of LED n
     if (left < 0) left = 0;
     if (left > 1) left = 1;
+    bool isGreen = n < green;
+    uint8_t cr = isGreen ? r : orR, cg = isGreen ? g : orG, cb = isGreen ? b : orB;
+    uint16_t kMin = isGreen ? kMinGreen : kMinOrange;
+    if (!isGreen && n == current) left *= pulse;
     // Linear fade: with so few steps a gamma curve would black the LED out
     // when it's only about half used.
     uint16_t k = (uint16_t)(left * 255 + 0.5f);
     if (left > 0 && k < kMin) k = kMin;      // keep a partly-left LED visible
     int i = pixelIndex(n % MATRIX_W, n / MATRIX_W);
-    pixels.setPixelColor(i, (uint8_t)((uint16_t)r * k / 255),
-                            (uint8_t)((uint16_t)g * k / 255),
-                            (uint8_t)((uint16_t)b * k / 255));
+    pixels.setPixelColor(i, (uint8_t)((uint16_t)cr * k / 255),
+                            (uint8_t)((uint16_t)cg * k / 255),
+                            (uint8_t)((uint16_t)cb * k / 255));
   }
   pixels.show();
 }
@@ -239,14 +276,16 @@ void handleState() {
   // without it means "unknown" (e.g. usage tracking switched off) → mascot.
   float limit = server.hasArg("limit") ? server.arg("limit").toFloat() : 0;
   float spent = server.hasArg("spent") ? server.arg("spent").toFloat() : 0;
+  float allowed = server.hasArg("allowed") ? server.arg("allowed").toFloat() : -1;
 
   g_r = r; g_g = g; g_b = b;
   g_effect = effect;
   g_spent = spent;
   g_limit = limit;
+  g_allowed = allowed;
 
-  Serial.printf("[/state] value=%s rgb=%02X%02X%02X effect=%d spent=%.2f limit=%.2f\n",
-                value.c_str(), r, g, b, (int)effect, spent, limit);
+  Serial.printf("[/state] value=%s rgb=%02X%02X%02X effect=%d spent=%.2f limit=%.2f allowed=%.2f\n",
+                value.c_str(), r, g, b, (int)effect, spent, limit, allowed);
 
   server.send(200, "text/plain", "ok");
 }
@@ -257,7 +296,7 @@ void handleRoot() {
     "<h2>Claude Code Indicator (8x8 Matrix)</h2>"
     "<p>WS2812 matrix indicator is online.</p>"
     "<p>Endpoint: <code>/state?value=&lt;working|waiting|done&gt;&amp;rgb=&lt;hex&gt;"
-    "[&amp;spent=&lt;usd&gt;&amp;limit=&lt;usd&gt;]</code></p>"
+    "[&amp;spent=&lt;usd&gt;&amp;limit=&lt;usd&gt;[&amp;allowed=&lt;usd&gt;]]</code></p>"
     "</body></html>";
   server.send(200, "text/html", html);
 }
@@ -345,8 +384,8 @@ void loop() {
     }
     case EFFECT_SOLID:
     default: {
-      float limit = g_limit, spent = g_spent;
-      if (limit > 0) showQuota(r, g, b, spent, limit);   // done: fuel gauge
+      float limit = g_limit, spent = g_spent, allowed = g_allowed;
+      if (limit > 0) showQuota(r, g, b, spent, limit, allowed);   // done: fuel gauge
       else           showSprite(r, g, b, 255, false);    // no quota: mascot
       break;
     }
