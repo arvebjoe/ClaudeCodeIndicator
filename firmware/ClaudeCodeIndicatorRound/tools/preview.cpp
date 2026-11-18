@@ -6,7 +6,7 @@
 //   ./preview <out-dir>
 //
 // Writes <out-dir>/frame_<state>_<nnn>.ppm — 40 frames at 50 ms for each
-// state (idle, working, waiting). Turn them into GIFs/PNGs with any tool,
+// state (idle, working, waiting), plus frame_setup.ppm (the Wi-Fi setup screen). Turn them into GIFs/PNGs with any tool,
 // e.g. ImageMagick:  magick -delay 5 frame_working_*.ppm working.gif
 #include <cstdio>
 #include <cstdint>
@@ -65,6 +65,17 @@ int main(int argc, char** argv) {
       snprintf(name, sizeof name, "%s/frame_%s_%03d.ppm", dir.c_str(), k.name, i);
       s.save(name);
     }
+  }
+
+  // Wi-Fi setup screen (no Wi-Fi configured yet: rings dim, no usage).
+  {
+    FrameSink s;
+    ui::drawRings(s, strip, 20, -1, -1);
+    ui::drawLabels(s, scratch, 0, 0, -1);
+    ui::Canvas cv{ui::STAGE_X, ui::STAGE_Y, ui::STAGE_W, ui::STAGE_H, stage};
+    ui::drawSetup(cv, "CLAUDE-1A2B", "", "192.168.4.1", 1000);
+    cv.push(s);
+    s.save(dir + "/frame_setup.ppm");
   }
   return 0;
 }

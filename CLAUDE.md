@@ -65,6 +65,13 @@ Claude Code hooks  --HTTP POST-->  tray app (HttpListener on :8787)  --optional 
   ESP32-C3 + 1.28" round GC9A01 via Arduino_GFX: Claude/Codex usage half rings and animated
   Clawd + Codex avatars). The round firmware's drawing lives in `render.h`, which is pure C++
   so `tools/preview.cpp` can render frames on a PC; see its README.
+  The round firmware has no `secrets.h`: Wi-Fi credentials are entered on its web page and
+  stored in NVS (`Preferences`, namespace `wifi`). With none saved, or the saved network
+  unreachable for 20 s, it runs an open setup AP `CLAUDE-XXXX` with a captive portal
+  (`DNSServer` answering `*`, unknown paths 302 → `http://192.168.4.1/`) and `drawSetup()`
+  replaces the avatars. On the LAN the same page (`/`, `POST /wifi`, `POST /forget`,
+  `/scan`, `/status`) changes or forgets the network. The other two firmwares still use
+  `secrets.h`.
 - **Waiting chime.** Entering the Waiting (red) state plays `.sounds\pop.mp3` from next to the
   exe via `winmm`'s `mciSendString` — `SoundPlayer` is WAV-only and WPF's `MediaPlayer` is too
   heavy a dependency for one clip. The MCI device is opened once, replayed with `play … from 0`,

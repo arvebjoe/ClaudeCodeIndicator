@@ -19,6 +19,8 @@ display. You can buy it with or without touch; touch isn't used.
 
 - **Below the avatars:** dollars left for Claude and percent left for Codex. The bottom line
   shows `WIFI...` while connecting, then the board's IP for one minute.
+- **Wi-Fi setup screen:** when the board has no Wi-Fi, the avatars make way for the name of
+  its setup network and the setup page's address (see below).
 
 The avatars are pixel-art takes of the two tools. Clawd follows `claude_full.png` and the
 Claude Code welcome banner. The Codex CLI has no official mascot, so its avatar borrows the
@@ -33,14 +35,46 @@ Step-by-step guide with troubleshooting: [UPLOAD.md](UPLOAD.md). Short version:
 2. Library Manager: install **GFX Library for Arduino** (Arduino_GFX, by moononournation).
 3. Set Board to **ESP32C3 Dev Module**, USB CDC On Boot to **Enabled**, and Flash Size to
    **4MB**.
-4. Copy `secrets.example.h` to `secrets.h` and fill in your Wi-Fi details.
-5. Flash the board. Read the IP off the screen and enter it in the tray app under **Set ESP32
-   address…**.
+4. Flash the board, then set up Wi-Fi from your phone (below).
+5. Read the IP off the screen and enter it in the tray app under **Set ESP32 address…**.
 
 The pins come from community posts for this board: SCLK 6, MOSI 7, DC 2, CS 10, backlight 3,
 no reset line. If the screen stays dark, check them against your board. Use `ROTATION` to
 turn the image so the USB-C port faces where you want it, and `BRIGHTNESS` to set the
 backlight level.
+
+## Wi-Fi setup
+
+The Wi-Fi name and password aren't in the source. You enter them on the board's web page, and
+the board keeps them in flash (NVS), so they survive power cycles and re-flashing.
+
+1. With no Wi-Fi saved, or when the saved network can't be reached for 20 s, the board opens
+   its own network, **`CLAUDE-XXXX`** (the last four hex digits of its MAC). The screen shows
+   **WIFI SETUP**, the network name, and `192.168.4.1`.
+2. Join `CLAUDE-XXXX` from a phone or laptop. It's an open network by default. The setup page
+   should open by itself (captive portal). If it doesn't, browse to `http://192.168.4.1/`.
+3. Pick your network from the list, or type its name, enter the password, and tap **Save and
+   connect**. The page shows the board's new address once it's on your Wi-Fi, and the screen
+   shows it too. The setup network closes 30 s after the board connects.
+
+Once the board is on your Wi-Fi, the same page is at `http://<board-ip>/` (or
+`http://claude-indicator.local/`). From there you can:
+
+- **Change network:** pick or type a new name and password. Leaving the password empty keeps
+  the saved one if the name is unchanged; with a new name it means an open network.
+- **Forget Wi-Fi settings:** erases the saved network. The board leaves your Wi-Fi and opens
+  `CLAUDE-XXXX` again.
+
+While the setup network is up, the board keeps retrying the saved network every 30 s. It
+pauses retries while someone is using the setup page, because each attempt makes the radio
+switch channels and knocks phones off the setup network.
+
+Settings at the top of the `.ino`: `AP_PASSWORD` (empty = open; 8–63 characters to require a
+password, which the screen then shows), `AP_PREFIX`, `PORTAL_AFTER_MS`, `RETRY_MS`,
+`PORTAL_LINGER_MS`.
+
+Anyone on your LAN can open the settings page. There's no login, the same as the `/state`
+endpoint. The page never shows the saved password.
 
 ## What the tray app sends
 
@@ -83,7 +117,8 @@ say they are disabled on Windows. Check the current
 
 ## Previewing without hardware
 
-`tools/preview.cpp` compiles the same `render.h` on a PC and writes PPM frames for each state:
+`tools/preview.cpp` compiles the same `render.h` on a PC and writes PPM frames for each state,
+plus `frame_setup.ppm` with the Wi-Fi setup screen:
 
 ```
 g++ -O2 -std=c++17 -o preview tools/preview.cpp && ./preview out/
