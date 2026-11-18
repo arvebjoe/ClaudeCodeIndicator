@@ -37,6 +37,7 @@ public sealed class UsageProbe : IDisposable
 
     // CSI (ESC [ ... final), OSC (ESC ] ... BEL/ST) and two-byte escapes.
     private static readonly Regex CursorForward = new(@"\x1b\[(\d*)C", RegexOptions.Compiled);
+    private static readonly Regex CursorColumn = new(@"\x1b\[\d*G", RegexOptions.Compiled);
     private static readonly Regex Csi = new(@"\x1b\[[0-?]*[ -/]*[@-~]", RegexOptions.Compiled);
     private static readonly Regex Osc = new(@"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)", RegexOptions.Compiled);
     private static readonly Regex OtherEsc = new(@"\x1b[@-Z\\-_]", RegexOptions.Compiled);
@@ -141,6 +142,9 @@ public sealed class UsageProbe : IDisposable
         // Renderers skip over unchanged cells with "cursor forward"; turn those back
         // into spaces so words don't run together, then drop every other escape.
         string s = CursorForward.Replace(raw, m => new string(' ', m.Groups[1].Length == 0 ? 1 : int.Parse(m.Groups[1].Value)));
+        // Same for "cursor to column N", which Claude Code's renderer uses between words
+        // (on macOS at least); one space is enough to keep the words apart.
+        s = CursorColumn.Replace(s, " ");
         s = Osc.Replace(s, "");
         s = Csi.Replace(s, "\n");   // other cursor moves usually mean "new place on screen"
         s = OtherEsc.Replace(s, "");
@@ -158,21 +162,53 @@ public sealed class UsageProbe : IDisposable
         {
             await Task.Delay(500, ct);
             string text = Snapshot();
-            if (!trusted && text.Contains("Yes, I trust", StringComparison.OrdinalIgnoreCase))
+            // Stripped text can have newlines where the screen has spaces (cursor moves,
+            // color changes), so these checks allow any whitespace between words.
+            if (!trusted && Regex.IsMatch(text, @"Yes,\s*I\s+trust", RegexOptions.IgnoreCase))
             {
-                trusted = true;
+                // Keys sent while the prompt is still drawing are dropped, so wait for it to
+                // go quiet first.
+                if (DateTime.UtcNow - _lastOutput < TimeSpan.FromSeconds(1)) continue;
+                trusted = await SelectTrustYesAsync(ct);
+                if (!trusted)
+                {
+                    // Never fall through to typing /usage + Enter here: Enter would pick
+                    // "No, exit". Drop the session; the next read starts a fresh one.
+                    StopProcess();
+                    throw new InvalidOperationException("could not answer Claude Code's folder-trust prompt");
+                }
+                // Clear before Enter, not after: the banner is drawn right away and only
+                // once, so clearing afterwards would wipe it and the wait below would time out.
                 Clear();
-                Send("\x1b[B");                     // arrow down
-                await Task.Delay(400, ct);
-                if (!Regex.IsMatch(Snapshot(), @"❯\s*Yes")) return; // not where we expect: give up this round
                 Send("\r");
-                await Task.Delay(1000, ct);
-                Clear();
                 continue;
             }
             // The welcome banner ("Claude Code v2.x") means the prompt is up.
-            if (text.Contains("Claude Code v") && DateTime.UtcNow - _lastOutput > TimeSpan.FromSeconds(2)) return;
+            if (Regex.IsMatch(text, @"Claude\s+Code\s+v\d") && DateTime.UtcNow - _lastOutput > TimeSpan.FromSeconds(2)) return;
         }
+    }
+
+    /// <summary>
+    /// Arrows down to "Yes, I trust this folder" and waits until the redraw shows it
+    /// selected. Re-sends the arrow only if the prompt didn't react at all (the key was
+    /// dropped): a second arrow it did receive could move the selection off "Yes".
+    /// </summary>
+    private async Task<bool> SelectTrustYesAsync(CancellationToken ct)
+    {
+        for (int attempt = 0; attempt < 3; attempt++)
+        {
+            Clear();
+            Send("\x1b[B");                         // arrow down
+            for (int waited = 0; waited < 3000; waited += 200)
+            {
+                await Task.Delay(200, ct);
+                if (Regex.IsMatch(Snapshot(), @"❯\s*Yes")) return true;
+            }
+            bool reacted;
+            lock (_gate) reacted = _screen.Length > 0;
+            if (reacted) return false;              // redrawn, but not onto "Yes": don't guess
+        }
+        return false;
     }
 
     private void Clear() { lock (_gate) _screen.Clear(); }

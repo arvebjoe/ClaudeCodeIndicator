@@ -77,9 +77,11 @@ internal sealed class MenuBar : IDisposable
         menu.Add(new NativeMenuItemSeparator());
         menu.Add(quitItem);
 
-        _tray = new TrayIcon { Menu = menu, IsVisible = true };
-        TrayIcon.SetIcons(app, new TrayIcons { _tray });
+        // Render before attaching: Avalonia.Native passes ToolTipText straight to native code
+        // on attach and throws on null, so the icon and tooltip must already be set.
+        _tray = new TrayIcon { Menu = menu, ToolTipText = "Claude Code Indicator", IsVisible = true };
         Render();
+        TrayIcon.SetIcons(app, new TrayIcons { _tray });
         _core.Changed += Render;
 
         // --- first run from the .app: start at login so it "just works" after a reboot.
