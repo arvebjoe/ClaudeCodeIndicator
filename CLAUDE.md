@@ -53,12 +53,15 @@ macOS (on a Mac; see `mac/README.md`):
 
 ```sh
 dotnet run --project mac                 # development; doesn't register a login item
-mac/build-app.sh                         # → mac/bin/app/Claude Code Indicator.app (osx-arm64)
+mac/build-app.sh                         # → mac/bin/app/Claude Code Indicator.app (osx-arm64, runtime bundled)
 ```
 
 Targets **.NET 10** (LTS); the spec's `net9.0` is superseded. `global.json` asks for SDK
-10.0.100 or newer (`rollForward: latestMajor`, so a .NET 11 SDK builds it too). The publish is
-framework-dependent, so the machine running it needs the .NET 10 Desktop Runtime.
+10.0.100 or newer (`rollForward: latestMajor`, so a .NET 11 SDK builds it too). Both apps set
+`<RollForward>Major</RollForward>`, so a framework-dependent build also runs where only a newer
+runtime (e.g. .NET 11) is installed. The Windows publish is framework-dependent (needs the .NET
+10+ Desktop Runtime); the Mac `.app` bundles the runtime. Mac crashes go to
+`~/Library/Logs/ClaudeCodeIndicator.log`.
 
 Publish to a **fixed** folder and don't move it afterward: on first run the app writes its own
 exe path into `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` for autostart, so relocating

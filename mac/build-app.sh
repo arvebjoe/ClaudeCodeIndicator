@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Builds "Claude Code Indicator.app" from this project. Run on a Mac with the .NET 10 SDK.
+# Builds "Claude Code Indicator.app" from this project. Run on a Mac with the .NET 10 SDK or newer.
 #
-#   ./build-app.sh                      # Apple Silicon, needs the .NET 10 runtime installed
+#   ./build-app.sh                      # Apple Silicon; the .NET runtime is bundled in the app
 #   ./build-app.sh osx-x64              # Intel Mac
-#   ./build-app.sh osx-arm64 --self-contained   # bundles the runtime (bigger, nothing to install)
+#   ./build-app.sh osx-arm64 --framework-dependent   # smaller; uses the installed .NET (10 or newer)
 #
 # Then move the .app to /Applications *before* the first launch: the first launch from the
 # bundle registers a login item with the app's path, and moving it later breaks that.
@@ -11,8 +11,8 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 RID="${1:-osx-arm64}"
-SELF_CONTAINED=false
-[[ "${2:-}" == "--self-contained" ]] && SELF_CONTAINED=true
+SELF_CONTAINED=true
+[[ "${2:-}" == "--framework-dependent" ]] && SELF_CONTAINED=false
 
 OUT="bin/app"
 APP="$OUT/Claude Code Indicator.app"

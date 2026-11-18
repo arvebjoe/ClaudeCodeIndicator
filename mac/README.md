@@ -16,7 +16,7 @@ macOS parts:
 
 ## Build and install
 
-You need the [.NET 10 SDK](https://dotnet.microsoft.com/download) on the Mac.
+You need the [.NET SDK](https://dotnet.microsoft.com/download), version 10 or newer, on the Mac.
 
 ```sh
 cd mac
@@ -25,8 +25,13 @@ mv "bin/app/Claude Code Indicator.app" /Applications/
 open "/Applications/Claude Code Indicator.app"
 ```
 
-By default the app uses the installed .NET 10 runtime. Add `--self-contained` to bundle the
-runtime instead (`./build-app.sh osx-arm64 --self-contained`).
+The .NET runtime is bundled inside the app, so it runs whatever .NET you have installed (or
+none). `./build-app.sh osx-arm64 --framework-dependent` makes a smaller app that uses the
+installed .NET instead (10 or newer).
+
+If the app doesn't appear, run it from Terminal to see the error:
+`"/Applications/Claude Code Indicator.app/Contents/MacOS/ClaudeCodeIndicator"`. Errors after
+startup are also written to `~/Library/Logs/ClaudeCodeIndicator.log`.
 
 Move the app to `/Applications` **before** you first open it. The first launch from the bundle
 turns on "Start at login", which saves the app's path in

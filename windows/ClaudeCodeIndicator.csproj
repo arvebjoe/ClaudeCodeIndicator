@@ -9,6 +9,8 @@
     <AssemblyName>ClaudeCodeIndicator</AssemblyName>
     <RootNamespace>ClaudeCodeIndicator</RootNamespace>
     <Version>1.0.0</Version>
+    <!-- Run on a newer .NET when 10 isn't installed (e.g. a machine with only .NET 11). -->
+    <RollForward>Major</RollForward>
     <!-- Keeps the colored .ico files next to the exe if you add them -->
     <ApplicationIcon></ApplicationIcon>
   </PropertyGroup>

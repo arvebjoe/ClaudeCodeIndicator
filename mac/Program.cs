@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
 using Avalonia;
 
 namespace ClaudeCodeIndicator;
@@ -17,8 +18,19 @@ internal static class Program
         using var mutex = new Mutex(true, "ClaudeCodeIndicator_SingleInstance", out bool isNew);
         if (!isNew) return 0;
 
-        ExtendPath();
-        return BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+        // A menu-bar app started from Finder has nowhere to show a crash, so log it.
+        AppDomain.CurrentDomain.UnhandledException += (_, e) => CrashLog.Write("unhandled", e.ExceptionObject);
+        TaskScheduler.UnobservedTaskException += (_, e) => CrashLog.Write("unobserved task", e.Exception);
+        try
+        {
+            ExtendPath();
+            return BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Write("startup", ex);
+            throw;
+        }
     }
 
     // Also used by the Avalonia previewer.
@@ -40,5 +52,21 @@ internal static class Program
         foreach (string d in ExecutableSearch.UnixFallbackDirectories())
             if (!dirs.Contains(d) && Directory.Exists(d)) dirs.Add(d);
         Environment.SetEnvironmentVariable("PATH", string.Join(Path.PathSeparator, dirs.Distinct()));
+    }
+}
+
+/// <summary>Appends crashes to ~/Library/Logs/ClaudeCodeIndicator.log (visible in Console.app).</summary>
+internal static class CrashLog
+{
+    public static void Write(string kind, object error)
+    {
+        try
+        {
+            string dir = Path.Combine(ExecutableSearch.HomeDirectory, "Library", "Logs");
+            Directory.CreateDirectory(dir);
+            File.AppendAllText(Path.Combine(dir, "ClaudeCodeIndicator.log"),
+                $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {kind}: {error}{Environment.NewLine}");
+        }
+        catch { /* nothing left to report to */ }
     }
 }
