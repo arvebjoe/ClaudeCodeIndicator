@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- macOS menu-bar front end. Builds anywhere, runs on macOS only; build the .app with
+       build-app.sh (on a Mac). All logic lives in ../core. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>ClaudeCodeIndicator</AssemblyName>
+    <RootNamespace>ClaudeCodeIndicator</RootNamespace>
+    <Version>1.0.0</Version>
+    <RuntimeIdentifiers>osx-arm64;osx-x64</RuntimeIdentifiers>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="12.1.5" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.1.5" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.5" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\core\ClaudeCodeIndicator.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Same chimes as the Windows app; build-app.sh moves them into Contents/Resources. -->
+    <None Include="..\windows\.sounds\**" LinkBase=".sounds" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

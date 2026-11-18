@@ -5,8 +5,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Current state
 
 The project has been created from the build spec and **compiles** (Debug + Release both build
-clean). It is split into a platform-neutral core and a Windows front end, so that a macOS
-front end can be added later without duplicating the logic:
+clean). It is split into a platform-neutral core and two front ends (Windows, macOS) that
+share all the logic:
 
 - `core/ClaudeCodeIndicator.Core.csproj` — `net10.0` class library, no UI and no OS-specific
   APIs. `IndicatorController` owns the state, timers, usage/Codex reads, ESP pushes and
@@ -18,6 +18,11 @@ front end can be added later without duplicating the logic:
   `Program.cs` (`Program`, `TrayContext`: NotifyIcon, menu, icons, autostart registry key),
   `IpInputForm.cs`, `MciSoundPlayer.cs` (`ISoundPlayer`), `ConPtyTerminal.cs`
   (`IPseudoTerminal`).
+- `mac/ClaudeCodeIndicator.Mac.csproj` — `net10.0`, Avalonia 12 (`TrayIcon` + `NativeMenu`,
+  no Dock icon), references the core. `MenuBar.cs` mirrors `TrayContext`; `UnixPtyTerminal.cs`
+  (`openpty` + `posix_spawn`), `MacServices.cs` (`AfplaySoundPlayer`, `LaunchAgent` for start
+  at login, `osascript` notifications), `DotIcons.cs`, `Dialogs.cs`. `build-app.sh` +
+  `Info.plist` (`LSUIElement`) build the `.app`. Not yet run on a real Mac — see `mac/README.md`.
 
 No `.ico` files have been added yet, so the app falls back to runtime-drawn colored dots. ESP32
 firmware exists in `firmware/` (the ESP integration is optional). Note: the color palette has
@@ -29,10 +34,10 @@ treat the spec as the source of intent unless the user says otherwise.
 
 ## What this is
 
-A system-tray app that surfaces Claude Code's live state as a colored notification-area icon,
-and optionally mirrors that color to an ESP32 RGB indicator over HTTP. The only front end today
-is Windows (`net10.0-windows` + WinForms), which **cannot be built or run on Linux/macOS**; the
-`core/` library builds anywhere.
+A system-tray (Windows) / menu-bar (macOS) app that surfaces Claude Code's live state as a
+colored icon, and optionally mirrors that color to an ESP32 RGB indicator over HTTP. The
+Windows front end (`net10.0-windows` + WinForms) **only builds on Windows**. The `core/` library
+and the macOS front end build anywhere, but the Mac app only runs on macOS.
 
 ## Build & run
 
@@ -42,6 +47,13 @@ in `core/` through a project reference, so there's nothing extra to build:
 ```powershell
 dotnet build windows\ClaudeCodeIndicator.csproj -c Release
 dotnet publish windows\ClaudeCodeIndicator.csproj -c Release -r win-x64 --self-contained false -o C:\Tools\ClaudeCodeIndicator
+```
+
+macOS (on a Mac; see `mac/README.md`):
+
+```sh
+dotnet run --project mac                 # development; doesn't register a login item
+mac/build-app.sh                         # → mac/bin/app/Claude Code Indicator.app (osx-arm64)
 ```
 
 Targets **.NET 10** (LTS); the spec's `net9.0` is superseded. `global.json` asks for SDK
@@ -135,7 +147,12 @@ These are easy to break and intentional:
   thread, and don't add core state that's mutated off the UI context.
 - **Core stays platform-neutral.** No WinForms, `System.Drawing`, registry or P/Invoke in
   `core/`; put OS-specific pieces behind an interface in `core/Platform.cs` and implement
-  them in the front end.
+  them in **both** front ends. Menu changes go in both `TrayContext` and `MenuBar`.
+- **macOS P/Invoke: no variadic functions.** `UnixPtyTerminal` only calls non-variadic libc
+  functions; `fcntl`/`ioctl`/`open` pass arguments differently on Apple Silicon and break
+  silently through P/Invoke. Children are spawned with `posix_spawn`, never `fork`.
+- **macOS PATH.** Apps launched from Finder/login get a minimal PATH; `mac/Program.cs` adds
+  `ExecutableSearch.UnixFallbackDirectories()` so `claude`, `codex` and `node` are found.
 - **GDI handle ownership.** When `<state>.ico` files are absent, icons are drawn at runtime
   (`MakeCircleIcon`); those `HICON` handles are tracked in `_ownedHandles` and freed with
   `DestroyIcon` in `Dispose`. Any new generated icon must be tracked the same way or it leaks.
