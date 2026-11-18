@@ -5,11 +5,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Current state
 
 The project has been created from the build spec and **compiles** (Debug + Release both build
-clean). It lives in the `windows/` subfolder:
+clean). It is split into a platform-neutral core and a Windows front end, so that a macOS
+front end can be added later without duplicating the logic:
 
-- `windows/ClaudeCodeIndicator.csproj` — `net9.0-windows`, WinForms, nullable enabled.
-- `windows/Program.cs` — the full app (~570 lines): `Program`, `TrayContext`, `AppSettings`,
-  `IpInputForm`.
+- `core/ClaudeCodeIndicator.Core.csproj` — `net9.0` class library, no UI and no OS-specific
+  APIs. `IndicatorController` owns the state, timers, usage/Codex reads, ESP pushes and
+  settings; `HookListener` (HTTP on :8787), `ClaudeHooks` (settings.json editing),
+  `EspClient`, `UsageProbe`, `CodexUsageProbe`, `WorkDays`, `AppSettings`/`SettingsStore`.
+  `Platform.cs` holds the interfaces a front end implements: `ISoundPlayer` and
+  `IPseudoTerminal`.
+- `windows/ClaudeCodeIndicator.csproj` — `net9.0-windows`, WinForms, references the core.
+  `Program.cs` (`Program`, `TrayContext`: NotifyIcon, menu, icons, autostart registry key),
+  `IpInputForm.cs`, `MciSoundPlayer.cs` (`ISoundPlayer`), `ConPtyTerminal.cs`
+  (`IPseudoTerminal`).
 
 No `.ico` files have been added yet, so the app falls back to runtime-drawn colored dots. ESP32
 firmware exists in `firmware/` (the ESP integration is optional). Note: the color palette has
@@ -21,13 +29,15 @@ treat the spec as the source of intent unless the user says otherwise.
 
 ## What this is
 
-A **Windows-only** system-tray app (`net9.0-windows` + WinForms) that surfaces Claude Code's live
-state as a colored notification-area icon, and optionally mirrors that color to an ESP32 RGB
-indicator over HTTP. **It cannot be built or run on Linux/macOS.**
+A system-tray app that surfaces Claude Code's live state as a colored notification-area icon,
+and optionally mirrors that color to an ESP32 RGB indicator over HTTP. The only front end today
+is Windows (`net9.0-windows` + WinForms), which **cannot be built or run on Linux/macOS**; the
+`core/` library builds anywhere.
 
 ## Build & run
 
-Build/run commands target the `windows/` project (run from there, or pass the path):
+Build/run commands target the `windows/` project (run from there, or pass the path). It pulls
+in `core/` through a project reference, so there's nothing extra to build:
 
 ```powershell
 dotnet build windows\ClaudeCodeIndicator.csproj -c Release
@@ -52,7 +62,8 @@ Claude Code hooks  --HTTP POST-->  tray app (HttpListener on :8787)  --optional 
   `permission_prompt|idle_prompt` → `/waiting` (yellow), `Stop` → `/done` (green). Routing is by
   **URL path only** — the POST body (which carries `session_id`) is read and discarded.
 - **State is latest-event-wins, globally** (not per session). The single source of truth is
-  `TrayContext._state`; `ApplyState` updates the icon, tooltip, menu text, and pushes to the ESP.
+  `IndicatorController.State`; `ApplyState` updates it, chimes, pushes to the ESP and raises
+  `Changed`, on which `TrayContext.Render` copies the state into the icon, tooltip and menu.
 - **Self-managing hooks.** The app reads and edits `~/.claude/settings.json` itself
   (`%USERPROFILE%\.claude\settings.json`). Edits are **surgical and idempotent**: install removes
   its own hooks first, then re-adds them; a hook is recognized as "ours" purely by whether its
@@ -65,18 +76,20 @@ Claude Code hooks  --HTTP POST-->  tray app (HttpListener on :8787)  --optional 
   ESP32-C3 + 1.28" round GC9A01 via Arduino_GFX: Claude/Codex usage half rings and animated
   Clawd + Codex avatars). The round firmware's drawing lives in `render.h`, which is pure C++
   so `tools/preview.cpp` can render frames on a PC; see its README.
-- **Waiting chime.** Entering the Waiting (red) state plays `.sounds\pop.mp3` from next to the
-  exe via `winmm`'s `mciSendString` — `SoundPlayer` is WAV-only and WPF's `MediaPlayer` is too
-  heavy a dependency for one clip. The MCI device is opened once, replayed with `play … from 0`,
-  and closed in `Dispose`. It fires only on the *transition* into Waiting, so a repeated
-  `Notification` hook doesn't double-pop. A missing file or an MCI failure sets
-  `_soundUnavailable` and is silent forever after. Toggle via the tray menu
-  ("Play sound when waiting", persisted as `SoundMuted`). The csproj copies `.sounds\**` to
-  the output directory.
+- **Chimes.** Entering Waiting plays `.sounds\pop.mp3` and entering Done plays
+  `.sounds\done.mp3`, from next to the exe. The core decides *when* (only on the *transition*,
+  so a repeated `Notification` hook doesn't double-pop; never when `SoundMuted`) and calls
+  `ISoundPlayer.Play`. On Windows that's `MciSoundPlayer`, via `winmm`'s `mciSendString` —
+  `SoundPlayer` is WAV-only and WPF's `MediaPlayer` is too heavy a dependency for one clip.
+  Each MCI device is opened once, replayed with `play … from 0`, and closed in `Dispose`. A
+  missing file or an MCI failure marks that clip unavailable and it's silent forever after.
+  Toggle via the tray menu ("Play sounds (waiting / done)", persisted as `SoundMuted`). The
+  csproj copies `.sounds\**` to the output directory.
 
-- **Usage credits (`windows/UsageProbe.cs`).** `claude -p "/usage"` omits the
+- **Usage credits (`core/UsageProbe.cs`).** `claude -p "/usage"` omits the
   `$X / $Y spent · Resets …` row, so the app keeps one interactive `claude` running in a
-  hidden ConPTY pseudo-console in `%APPDATA%\ClaudeCodeIndicator\usage-probe`. 10 s after
+  hidden pseudo terminal (`IPseudoTerminal`; on Windows `ConPtyTerminal`, a ConPTY
+  pseudo-console) in `%APPDATA%\ClaudeCodeIndicator\usage-probe`. 10 s after
   start, every 10 min, and on each Stop (→ idle, at most once a minute) it sends Esc, types `/usage` + Enter, strips the ANSI output and
   regex-matches the row (last match wins, after the "Refreshing…" redraw settles). The
   session runs with `--setting-sources local --strict-mcp-config --permission-mode plan`
@@ -86,18 +99,19 @@ Claude Code hooks  --HTTP POST-->  tray app (HttpListener on :8787)  --optional 
   marked "(stale)". Toggle: "Read usage every 10 min" (`UsageTrackingOff`). Fragile by
   nature: a change to the `/usage` layout in a Claude Code update can break the regex.
 
-- **Codex usage (`windows/CodexUsageProbe.cs`).** Structured, no scraping: every 10 min
+- **Codex usage (`core/CodexUsageProbe.cs`).** Structured, no scraping: every 10 min
   (first read 15 s after start, and on "Refresh usage now") it spawns `codex app-server`
   (newline-delimited JSON-RPC over stdio) in `%APPDATA%\ClaudeCodeIndicator\codex-probe`,
   does `initialize` → `initialized`, calls `account/rateLimits/read`, then kills the process
   tree. It reads the `codex` bucket (or legacy `rateLimits`): `individualLimit`
   (workspace monthly credit limit, `used`/`limit` as strings), `credits.balance`, and the
   `primary`/`secondary` windows (`usedPercent`, 300 min = 5h, 10080 = weekly). Needs a
-  ChatGPT sign-in in Codex (`~/.codex/auth.json`). Finds `codex.exe` on PATH, else the npm
-  shim `codex.cmd` via `cmd.exe`. Shown in the "Codex:" menu row and tooltip, and sent to
+  ChatGPT sign-in in Codex (`~/.codex/auth.json`). On Windows it finds `codex.exe` on PATH,
+  else the npm shim `codex.cmd` via `cmd.exe`; elsewhere `codex` on PATH or in the usual
+  install folders (`ExecutableSearch`). Shown in the "Codex:" menu row and tooltip, and sent to
   the ESP as `&cused=<percent used>` (`GaugeUsedPercent`: credit limit if any, else the
   fuller of the 5h/weekly windows).
-- **Codex state.** `/codex/working|waiting|done` on the same listener set `_codexState`,
+- **Codex state.** `/codex/working|waiting|done` on the same listener set `CodexState`,
   which is only forwarded to the ESP (`&codex=<state>`); the tray icon stays Claude-only.
   The app does not install Codex hooks — they're set up by hand (see
   `firmware/ClaudeCodeIndicatorRound/README.md`). Toggle: "Read Codex usage every 10 min" (`CodexUsageOff`). The app-server
@@ -109,14 +123,21 @@ These are easy to break and intentional:
 
 - **Single instance** via named mutex `ClaudeCodeIndicator_SingleInstance` — prevents autostart +
   manual launch from double-binding port 8787. A second instance exits immediately.
-- **UI-thread marshalling.** The HTTP listener runs on a background thread; all NotifyIcon updates
-  must be marshalled through the hidden `_marshal` control (`RequestState` → `BeginInvoke` →
-  `ApplyState`). Don't touch WinForms objects directly from the listener loop.
+- **UI-thread marshalling.** The HTTP listener and the usage timers run on background threads.
+  `IndicatorController` posts every hook event and timer tick to the `SynchronizationContext`
+  it was constructed with (on Windows a `WindowsFormsSynchronizationContext`, installed in
+  `Main`), so all state changes, the async reads' continuations and `Changed` run on the UI
+  thread and nothing needs locking. Don't touch WinForms objects from a listener or timer
+  thread, and don't add core state that's mutated off the UI context.
+- **Core stays platform-neutral.** No WinForms, `System.Drawing`, registry or P/Invoke in
+  `core/`; put OS-specific pieces behind an interface in `core/Platform.cs` and implement
+  them in the front end.
 - **GDI handle ownership.** When `<state>.ico` files are absent, icons are drawn at runtime
   (`MakeCircleIcon`); those `HICON` handles are tracked in `_ownedHandles` and freed with
   `DestroyIcon` in `Dispose`. Any new generated icon must be tracked the same way or it leaks.
-- **Listener port 8787** is a `const Port`. It is hardcoded into the hook URLs the app writes, so
-  changing it must stay consistent across the listener prefixes, `HookSpec`, and `IsMyHandler`.
+- **Listener port 8787** is `HookListener.Port`. It is hardcoded into the hook URLs the app
+  writes, so changing it must stay consistent across the listener prefixes, `HookSpec`, and
+  `IsMyHandler` (both in `ClaudeHooks`).
 - Icons load from `<state>.ico` next to the exe if present, else fall back to a drawn colored dot —
   the icon is never blank.
 
@@ -135,7 +156,7 @@ dark in reading order (top-left → right, then down), and the current one fades
 without `spent`/`limit` (tracking off, or no reading yet) shows the mascot again.
 
 **Daily pace.** `allowed` = `limit × work days so far (including today) / work days in the month`
-(`windows/WorkDays.cs`: Mon–Fri minus Norwegian public holidays, Easter included, plus Dec 24
+(`core/WorkDays.cs`: Mon–Fri minus Norwegian public holidays, Easter included, plus Dec 24
 and Dec 31; the budget resets on the 1st). LEDs that cover `allowed` are green and the rest
 are Claude orange. Leftover green carries over to the next day. When spending passes the pace,
 the fading LED is orange and it pulses. If `allowed` is missing, every LED is green.

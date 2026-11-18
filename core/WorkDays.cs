@@ -1,10 +1,12 @@
 using System;
 
+namespace ClaudeCodeIndicator;
+
 // Spreads the monthly usage budget evenly over the month's work days, so the
 // matrix can show green for "within today's pace" and orange for "ahead of it".
 // A work day is Monday–Friday that isn't a Norwegian public holiday. Dec 24 and
 // Dec 31 also count as days off, since most offices close then.
-internal static class WorkDays
+public static class WorkDays
 {
     // Budget available through the end of `today`: limit × (work days so far,
     // including today) / (work days in the month). The budget resets on the 1st.

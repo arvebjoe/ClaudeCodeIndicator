@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Platform-neutral part of the indicator: hook listener, Claude Code settings editing,
+       ESP32 push, usage/Codex probes and the state logic. No UI and no OS-specific APIs;
+       each front end (windows/, later mac/) supplies those through the interfaces in
+       Platform.cs. -->
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>ClaudeCodeIndicator.Core</AssemblyName>
+    <RootNamespace>ClaudeCodeIndicator</RootNamespace>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+
+</Project>

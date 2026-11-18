@@ -29,9 +29,9 @@ second — the process will exhaust GDI handles within minutes. Two safe options
 
 ## Thread / state fit
 
-Animation must be driven from the UI thread, same as `ApplyState`. The listener already marshals
-state changes through `_marshal` → `ApplyState`, so the natural design is: `ApplyState`
-starts/stops/reconfigures the animation timer for the current state (start a pulse on Working, stop
+Animation must be driven from the UI thread, same as `ApplyState`. The core already posts state
+changes to the UI thread and raises `IndicatorController.Changed` there, so the natural design is:
+`TrayContext.Render` starts/stops/reconfigures the animation timer for the current state (start a pulse on Working, stop
 on Done and show a static frame). **Don't touch the timer or icon from the listener thread.**
 
 ## Per-state ideas
@@ -51,7 +51,7 @@ reads as "status," whereas a fast spinner reads as "notification spam." Favor sl
 
 - Pre-render N frames per animated state in `TrayContext` init, tracking every `HICON` in
   `_ownedHandles` so `Dispose` frees them.
-- Add a `Timer` field; `ApplyState` sets the active frame array + index and starts/stops the timer.
+- Add a `Timer` field; `Render` sets the active frame array + index and starts/stops the timer.
 - On `Tick`, advance the index and assign `_trayIcon.Icon = frames[index]`.
 
 ## Re: the Claude mascot SVG animations

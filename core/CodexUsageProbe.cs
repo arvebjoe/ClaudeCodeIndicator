@@ -12,7 +12,7 @@ using System.Threading.Tasks;
 namespace ClaudeCodeIndicator;
 
 /// <summary>One rolling Codex rate-limit window (e.g. the 5-hour or the weekly one).</summary>
-internal sealed record CodexWindow(int UsedPercent, long? WindowMinutes, DateTime? ResetsAt)
+public sealed record CodexWindow(int UsedPercent, long? WindowMinutes, DateTime? ResetsAt)
 {
     public string Label => WindowMinutes switch
     {
@@ -26,7 +26,7 @@ internal sealed record CodexWindow(int UsedPercent, long? WindowMinutes, DateTim
 }
 
 /// <summary>What <c>account/rateLimits/read</c> told us about the Codex account.</summary>
-internal sealed record CodexUsageReading(
+public sealed record CodexUsageReading(
     CodexWindow? Primary,
     CodexWindow? Secondary,
     decimal? CreditsUsed,       // workspace spend control: effective monthly credit limit
@@ -87,7 +87,7 @@ internal sealed record CodexUsageReading(
 ///
 /// The app-server protocol is marked unstable upstream, so every field is optional here.
 /// </summary>
-internal sealed class CodexUsageProbe
+public sealed class CodexUsageProbe
 {
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(30);
     private readonly string _workDir;
@@ -253,32 +253,28 @@ internal sealed class CodexUsageProbe
     }
 
     /// <summary>
-    /// Locates codex: a native codex.exe on PATH (standalone/winget install) first, else the
-    /// npm shim codex.cmd, which has to go through cmd.exe. Kill(entireProcessTree) cleans up
-    /// the node + native children the shim spawns.
+    /// Locates codex. Windows: a native codex.exe on PATH (standalone/winget install) first,
+    /// else the npm shim codex.cmd, which has to go through cmd.exe. Kill(entireProcessTree)
+    /// cleans up the node + native children the shim spawns. Elsewhere: <c>codex</c> on PATH
+    /// or in the usual install folders.
     /// </summary>
     private static (string File, string Args)? FindCodex()
     {
-        var dirs = new List<string>((Environment.GetEnvironmentVariable("PATH") ?? "").Split(';'));
-        dirs.Add(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "npm"));
-        dirs.Add(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "bin"));
+        var dirs = new List<string>(ExecutableSearch.PathDirectories());
+        if (!OperatingSystem.IsWindows())
+        {
+            dirs.AddRange(ExecutableSearch.UnixFallbackDirectories());
+            return ExecutableSearch.Find(new[] { "codex" }, dirs) is { } unix ? (unix, "app-server") : null;
+        }
 
-        foreach (string name in new[] { "codex.exe", "codex.cmd" })
-            foreach (var dir in dirs)
-            {
-                try
-                {
-                    if (string.IsNullOrWhiteSpace(dir)) continue;
-                    string p = Path.Combine(dir.Trim().Trim('"'), name);
-                    if (!File.Exists(p)) continue;
-                    return name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
-                        ? (p, "app-server")
-                        : (Path.Combine(Environment.SystemDirectory, "cmd.exe"), $"/d /s /c \"\"{p}\" app-server\"");
-                }
-                catch { }
-            }
-        return null;
+        dirs.Add(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "npm"));
+        dirs.Add(Path.Combine(ExecutableSearch.HomeDirectory, ".local", "bin"));
+        string? p = ExecutableSearch.Find(new[] { "codex.exe", "codex.cmd" }, dirs);
+        if (p is null) return null;
+        return p.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
+            ? (p, "app-server")
+            : (Path.Combine(Environment.SystemDirectory, "cmd.exe"), $"/d /s /c \"\"{p}\" app-server\"");
     }
 }
 
-internal sealed class CodexUsageException(string message) : Exception(message);
+public sealed class CodexUsageException(string message) : Exception(message);
