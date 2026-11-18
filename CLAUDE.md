@@ -8,13 +8,13 @@ The project has been created from the build spec and **compiles** (Debug + Relea
 clean). It is split into a platform-neutral core and a Windows front end, so that a macOS
 front end can be added later without duplicating the logic:
 
-- `core/ClaudeCodeIndicator.Core.csproj` — `net9.0` class library, no UI and no OS-specific
+- `core/ClaudeCodeIndicator.Core.csproj` — `net10.0` class library, no UI and no OS-specific
   APIs. `IndicatorController` owns the state, timers, usage/Codex reads, ESP pushes and
   settings; `HookListener` (HTTP on :8787), `ClaudeHooks` (settings.json editing),
   `EspClient`, `UsageProbe`, `CodexUsageProbe`, `WorkDays`, `AppSettings`/`SettingsStore`.
   `Platform.cs` holds the interfaces a front end implements: `ISoundPlayer` and
   `IPseudoTerminal`.
-- `windows/ClaudeCodeIndicator.csproj` — `net9.0-windows`, WinForms, references the core.
+- `windows/ClaudeCodeIndicator.csproj` — `net10.0-windows`, WinForms, references the core.
   `Program.cs` (`Program`, `TrayContext`: NotifyIcon, menu, icons, autostart registry key),
   `IpInputForm.cs`, `MciSoundPlayer.cs` (`ISoundPlayer`), `ConPtyTerminal.cs`
   (`IPseudoTerminal`).
@@ -31,7 +31,7 @@ treat the spec as the source of intent unless the user says otherwise.
 
 A system-tray app that surfaces Claude Code's live state as a colored notification-area icon,
 and optionally mirrors that color to an ESP32 RGB indicator over HTTP. The only front end today
-is Windows (`net9.0-windows` + WinForms), which **cannot be built or run on Linux/macOS**; the
+is Windows (`net10.0-windows` + WinForms), which **cannot be built or run on Linux/macOS**; the
 `core/` library builds anywhere.
 
 ## Build & run
@@ -43,6 +43,10 @@ in `core/` through a project reference, so there's nothing extra to build:
 dotnet build windows\ClaudeCodeIndicator.csproj -c Release
 dotnet publish windows\ClaudeCodeIndicator.csproj -c Release -r win-x64 --self-contained false -o C:\Tools\ClaudeCodeIndicator
 ```
+
+Targets **.NET 10** (LTS); the spec's `net9.0` is superseded. `global.json` asks for SDK
+10.0.100 or newer (`rollForward: latestMajor`, so a .NET 11 SDK builds it too). The publish is
+framework-dependent, so the machine running it needs the .NET 10 Desktop Runtime.
 
 Publish to a **fixed** folder and don't move it afterward: on first run the app writes its own
 exe path into `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` for autostart, so relocating

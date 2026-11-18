@@ -5,7 +5,7 @@
        each front end (windows/, later mac/) supplies those through the interfaces in
        Platform.cs. -->
   <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
     <AssemblyName>ClaudeCodeIndicator.Core</AssemblyName>
